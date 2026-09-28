@@ -1,9 +1,9 @@
 import { computed, reactive, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type {
-  AuditRecord, DictionaryEntry, DictionarySnapshot, DuplicatePair, EntryStatus, ReviewComment, VersionRecord
+  AuditRecord, DictionaryEntry, DictionarySnapshot, DuplicatePair, EntryRelation, EntryStatus, ReviewComment, SplitSensePayload, VersionRecord
 } from '~/types/dictionary';
-import { findDuplicates } from '~/utils/dictionary';
+import { findDuplicates, joinSenses, removeSensesFromDefinition } from '~/utils/dictionary';
 
 const now = () => new Date().toISOString();
 const uid = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 9)}-${Date.now().toString(36)}`;
@@ -24,7 +24,7 @@ const seedEntries = (): DictionaryEntry[] => [
       { id: 'src-1', title: '北坡方言词汇表', citation: '李某某记录，1987，手稿第 42 页', url: '' },
       { id: 'src-2', title: '嘎木村发音人访谈', citation: '录音 A-2018-04-17，00:12:31', url: '' }
     ],
-    synonyms: ['水潭', '泉水'], status: 'confirmed', notes: '声调标音经两位发音人复核。', createdAt: '2024-08-11T04:00:00.000Z', updatedAt: '2025-03-09T06:12:00.000Z', reviewerComments: []
+    synonyms: ['水潭', '泉水'], status: 'confirmed', notes: '声调标音经两位发音人复核。', createdAt: '2024-08-11T04:00:00.000Z', updatedAt: '2025-03-09T06:12:00.000Z', reviewerComments: [], relations: []
   },
   {
     id: 'entry-002', headword: 'dʑa⁵⁵', pronunciation: 'dʑa˥（高平调）', partOfSpeech: '动词', definition: '把谷物摊开晾晒；引申为耐心等待事情成熟。',
@@ -32,20 +32,20 @@ const seedEntries = (): DictionaryEntry[] => [
     examples: [{ id: 'ex-3', text: 'kho⁵⁵ dʑa⁵⁵ tɕhi³³.', translation: '谷子已经摊开晒了。', source: '田野记录 2023-09-12' }],
     sources: [{ id: 'src-3', title: '东南村生产词调查', citation: '王某某，2023，词条 071', url: '' }],
     synonyms: ['晒', '等待'], status: 'review', notes: '“等待”的引申义需由审校人确认。', createdAt: '2024-10-01T06:00:00.000Z', updatedAt: '2025-02-18T02:00:00.000Z',
-    reviewerComments: [{ id: 'c-1', field: 'definition', author: '主审·和老师', message: '“等待”是短语层面的临时义还是固定引申义？请补充一条例句。', status: 'open', createdAt: '2025-02-18T02:00:00.000Z', replies: [] }]
+    reviewerComments: [{ id: 'c-1', field: 'definition', author: '主审·和老师', message: '“等待”是短语层面的临时义还是固定引申义？请补充一条例句。', status: 'open', createdAt: '2025-02-18T02:00:00.000Z', replies: [] }], relations: []
   },
   {
-    id: 'entry-003', headword: 'dʑa³³', pronunciation: 'dʑa˧（中调）', partOfSpeech: '动词', definition: '摊晒谷物，使水分蒸发。', dialectVariants: [], examples: [{ id: 'ex-4', text: 'dʑa³³ ko⁵⁵ kho⁵⁵.', translation: '把粮食拿去晒。', source: '语音调查 M-12' }], sources: [{ id: 'src-4', title: '方言调查卡片', citation: '1992，卡片 M-12', url: '' }], synonyms: ['晒粮'], status: 'disputed', notes: '与 dʑa⁵⁵ 可能是同一词条的声调变体。', createdAt: '2024-12-01T06:00:00.000Z', updatedAt: '2025-02-20T03:00:00.000Z', reviewerComments: []
+    id: 'entry-003', headword: 'dʑa³³', pronunciation: 'dʑa˧（中调）', partOfSpeech: '动词', definition: '摊晒谷物，使水分蒸发。', dialectVariants: [], examples: [{ id: 'ex-4', text: 'dʑa³³ ko⁵⁵ kho⁵⁵.', translation: '把粮食拿去晒。', source: '语音调查 M-12' }], sources: [{ id: 'src-4', title: '方言调查卡片', citation: '1992，卡片 M-12', url: '' }], synonyms: ['晒粮'], status: 'disputed', notes: '与 dʑa⁵⁵ 可能是同一词条的声调变体。', createdAt: '2024-12-01T06:00:00.000Z', updatedAt: '2025-02-20T03:00:00.000Z', reviewerComments: [], relations: []
   },
   {
-    id: 'entry-004', headword: 'ʔma³³', pronunciation: 'ʔma˧', partOfSpeech: '名词', definition: '母亲；也可用于称呼年长女性亲属。', dialectVariants: [{ id: 'v-4', dialect: '河西话', form: 'ma³³', pronunciation: 'ma', note: '喉塞音弱化' }], examples: [{ id: 'ex-5', text: 'ʔma³³, ŋa⁵⁵ tɕi³³ lo³³.', translation: '妈妈，我要回家了。', source: '日常生活会话 01' }], sources: [{ id: 'src-5', title: '亲缘称谓调查', citation: '赵某某，2011，表 3', url: '' }], synonyms: ['妈妈', '母亲'], status: 'draft', notes: '需补充敬称形式。', createdAt: '2025-01-11T04:00:00.000Z', updatedAt: '2025-01-11T04:00:00.000Z', reviewerComments: []
+    id: 'entry-004', headword: 'ʔma³³', pronunciation: 'ʔma˧', partOfSpeech: '名词', definition: '母亲；也可用于称呼年长女性亲属。', dialectVariants: [{ id: 'v-4', dialect: '河西话', form: 'ma³³', pronunciation: 'ma', note: '喉塞音弱化' }], examples: [{ id: 'ex-5', text: 'ʔma³³, ŋa⁵⁵ tɕi³³ lo³³.', translation: '妈妈，我要回家了。', source: '日常生活会话 01' }], sources: [{ id: 'src-5', title: '亲缘称谓调查', citation: '赵某某，2011，表 3', url: '' }], synonyms: ['妈妈', '母亲'], status: 'draft', notes: '需补充敬称形式。', createdAt: '2025-01-11T04:00:00.000Z', updatedAt: '2025-01-11T04:00:00.000Z', reviewerComments: [], relations: []
   },
   {
-    id: 'entry-005', headword: 'lo³³', pronunciation: 'lo˧', partOfSpeech: '方向词', definition: '表示向说话者所在位置移动，常与位移动词搭配。', dialectVariants: [], examples: [{ id: 'ex-6', text: 'a³³ mɨ⁵⁵ lo³³.', translation: '到这里来。', source: '语法调查句表 03' }], sources: [{ id: 'src-6', title: '动词方向范畴笔记', citation: '陈某某，2005，第 18 页', url: '' }], synonyms: ['来'], status: 'confirmed', notes: '', createdAt: '2024-09-18T02:00:00.000Z', updatedAt: '2025-01-04T02:00:00.000Z', reviewerComments: []
+    id: 'entry-005', headword: 'lo³³', pronunciation: 'lo˧', partOfSpeech: '方向词', definition: '表示向说话者所在位置移动，常与位移动词搭配。', dialectVariants: [], examples: [{ id: 'ex-6', text: 'a³³ mɨ⁵⁵ lo³³.', translation: '到这里来。', source: '语法调查句表 03' }], sources: [{ id: 'src-6', title: '动词方向范畴笔记', citation: '陈某某，2005，第 18 页', url: '' }], synonyms: ['来'], status: 'confirmed', notes: '', createdAt: '2024-09-18T02:00:00.000Z', updatedAt: '2025-01-04T02:00:00.000Z', reviewerComments: [], relations: []
   },
   {
     id: 'entry-006', headword: 'tsha⁵⁵', pronunciation: 'tsha˥', partOfSpeech: '名词', definition: '水源；泉水涌出的地方。', dialectVariants: [], examples: [{ id: 'ex-7', text: 'tsha⁵⁵ ʔmɨ⁵⁵ ma³³.', translation: '泉眼在这个地方。', source: '地名调查 2022-07' }], sources: [{ id: 'src-7', title: '村落地名调查', citation: '录音 C-2022-07，00:22:08', url: '' }], synonyms: ['泉眼', '水潭'], status: 'review', notes: '', createdAt: '2025-02-01T02:00:00.000Z', updatedAt: '2025-02-25T02:00:00.000Z',
-    reviewerComments: [{ id: 'c-2', field: 'sources', author: '审校·罗老师', message: '请把录音中发言人姓名补到资料来源。', status: 'open', createdAt: '2025-02-25T02:00:00.000Z', replies: [{ id: 'r-1', author: '编辑·阿木', message: '已向调查员索取授权信息，暂以录音编号占位。', createdAt: '2025-02-26T01:00:00.000Z' }] }]
+    reviewerComments: [{ id: 'c-2', field: 'sources', author: '审校·罗老师', message: '请把录音中发言人姓名补到资料来源。', status: 'open', createdAt: '2025-02-25T02:00:00.000Z', replies: [{ id: 'r-1', author: '编辑·阿木', message: '已向调查员索取授权信息，暂以录音编号占位。', createdAt: '2025-02-26T01:00:00.000Z' }] }], relations: []
   }
 ];
 
@@ -100,6 +100,8 @@ export const useDictionaryStore = defineStore('dictionary', () => {
   function restore(value: DictionarySnapshot) {
     revision.value = value.revision ?? 1;
     entries.splice(0, entries.length, ...(clone(value.entries ?? [])));
+    // 兼容旧版本导出：拆条功能之前保存的数据没有来源关系字段
+    entries.forEach((entry) => { if (!Array.isArray(entry.relations)) entry.relations = []; });
     versions.splice(0, versions.length, ...(clone(value.versions ?? [])));
     audit.splice(0, audit.length, ...(clone(value.audit ?? [])));
     if (!entries.some((entry) => entry.id === selectedId.value)) selectedId.value = entries[0]?.id ?? '';
@@ -120,7 +122,7 @@ export const useDictionaryStore = defineStore('dictionary', () => {
 
   function createEntry() {
     const entry: DictionaryEntry = {
-      id: uid('entry'), headword: '新词条', pronunciation: '', partOfSpeech: '', definition: '', dialectVariants: [], examples: [], sources: [], synonyms: [], status: 'draft', notes: '', createdAt: now(), updatedAt: now(), reviewerComments: []
+      id: uid('entry'), headword: '新词条', pronunciation: '', partOfSpeech: '', definition: '', dialectVariants: [], examples: [], sources: [], synonyms: [], status: 'draft', notes: '', createdAt: now(), updatedAt: now(), reviewerComments: [], relations: []
     };
     commit('新建词条', '创建草稿词条', [entry.id], () => entries.unshift(entry));
     selectedId.value = entry.id;
@@ -129,7 +131,68 @@ export const useDictionaryStore = defineStore('dictionary', () => {
   function updateField<K extends keyof DictionaryEntry>(entryId: string, field: K, value: DictionaryEntry[K], label = String(field)) {
     const entry = entries.find((item) => item.id === entryId);
     if (!entry || JSON.stringify(entry[field]) === JSON.stringify(value)) return;
-    commit('编辑字段', `${label}发生更新`, [entryId], () => { entry[field] = value; });
+    commit('编辑字段', `${label}发生更新`, [entryId], () => {
+      entry[field] = value;
+      // 来源关系里冗余记录了对方词形，词形变更时同步刷新，保证修改后关系不丢、展示不陈旧
+      if (field === 'headword') {
+        entries.forEach((other) => {
+          other.relations?.forEach((relation) => {
+            if (relation.relatedEntryId === entryId) relation.relatedHeadword = value as string;
+          });
+        });
+      }
+    });
+  }
+
+  function splitEntry(payload: SplitSensePayload) {
+    const source = entries.find((item) => item.id === payload.entryId);
+    if (!source) return;
+    const movedSenses = payload.movedSenses.map((sense) => sense.trim()).filter(Boolean);
+    const movedExampleIds = new Set(payload.movedExampleIds);
+    const editedDefinition = payload.definition.trim();
+    const remainingDefinition = removeSensesFromDefinition(editedDefinition, movedSenses);
+    // 至少移出一个义项、原条至少保留一个义项；勾选例句必须全部属于当前词条，未勾选的留在原条
+    const knownExampleIds = new Set(source.examples.map((example) => example.id));
+    if (!movedSenses.length || !remainingDefinition) return;
+    if ([...movedExampleIds].some((id) => !knownExampleIds.has(id))) return;
+
+    const stamp = now();
+    // 新条目继承审校意见（含回复），复制并重新编号，保证两边后续处理互不影响
+    const inheritedComments: ReviewComment[] = clone(source.reviewerComments).map((comment) => ({
+      ...comment,
+      id: uid('comment'),
+      replies: comment.replies.map((reply) => ({ ...reply, id: uid('reply') }))
+    }));
+    const movedExamples = source.examples.filter((example) => movedExampleIds.has(example.id));
+    const child: DictionaryEntry = {
+      id: uid('entry'),
+      headword: source.headword,
+      pronunciation: source.pronunciation,
+      partOfSpeech: payload.partOfSpeech.trim() || source.partOfSpeech,
+      definition: joinSenses(movedSenses),
+      dialectVariants: [],
+      examples: clone(movedExamples),
+      sources: [],
+      synonyms: [],
+      status: 'draft',
+      notes: '',
+      createdAt: stamp,
+      updatedAt: stamp,
+      reviewerComments: inheritedComments,
+      relations: []
+    };
+    commit('按义项拆分', `从“${source.headword}”移出 ${movedSenses.length} 个义项、${movedExamples.length} 条例句到新条目`, [source.id, child.id], () => {
+      source.definition = remainingDefinition;
+      source.examples = source.examples.filter((example) => !movedExampleIds.has(example.id));
+      source.relations = source.relations ?? [];
+      child.relations = [
+        { id: uid('relation'), type: 'split-parent', relatedEntryId: source.id, relatedHeadword: source.headword, detail: `由该词条按义项拆出：${child.definition}`, at: stamp },
+        ...child.relations
+      ];
+      source.relations.push({ id: uid('relation'), type: 'split-child', relatedEntryId: child.id, relatedHeadword: child.headword, detail: `拆出新条目（${child.partOfSpeech || '词性待定'}）：${child.definition}`, at: stamp });
+      entries.unshift(child);
+    });
+    selectedId.value = child.id;
   }
 
   function setStatus(entryId: string, status: EntryStatus) {
@@ -250,6 +313,8 @@ export const useDictionaryStore = defineStore('dictionary', () => {
     const sources = entries.filter((entry) => sourceIds.includes(entry.id));
     if (!target || !sources.length) return;
     commit('合并重复词条', `将 ${sources.length} 个重复词条合并到“${target.headword}”`, [targetId, ...sourceIds], () => {
+      // 合并会删除被并条，先把它们的来源关系全部迁移到主条，避免按义项拆分的溯源关系丢失
+      migrateRelationsOnMerge(target, sources);
       sources.forEach((source) => {
         const layers: Array<keyof DictionaryEntry> = ['dialectVariants', 'examples', 'sources', 'synonyms', 'reviewerComments'];
         layers.forEach((field) => {
@@ -269,6 +334,46 @@ export const useDictionaryStore = defineStore('dictionary', () => {
         if (index >= 0) entries.splice(index, 1);
       });
     });
+  }
+
+  function migrateRelationsOnMerge(target: DictionaryEntry, sources: DictionaryEntry[]) {
+    target.relations = target.relations ?? [];
+    const sourceIds = new Set(sources.map((source) => source.id));
+    const stampMergeNote = (detail: string) => (detail.includes('（合并保留）') ? detail : `${detail}（合并保留）`);
+
+    // 1) 主条继承被并条一侧的来源关系（被并条删除后溯源不断）
+    const collected: EntryRelation[] = [];
+    const absorb = (relation: EntryRelation) => {
+      if (relation.relatedEntryId === target.id || sourceIds.has(relation.relatedEntryId)) return;
+      collected.push({ ...clone(relation), id: uid('relation'), detail: stampMergeNote(relation.detail) });
+    };
+    target.relations.forEach(absorb);
+    sources.forEach((source) => (source.relations ?? []).forEach(absorb));
+
+    // 2) 第三方词条指向被并条的一侧：就地改指向主条，避免悬空
+    entries.forEach((entry) => {
+      if (entry.id === target.id || sourceIds.has(entry.id)) return;
+      entry.relations?.forEach((relation) => {
+        if (sourceIds.has(relation.relatedEntryId)) {
+          relation.relatedEntryId = target.id;
+          relation.relatedHeadword = target.headword;
+          relation.detail = stampMergeNote(relation.detail);
+        }
+      });
+    });
+
+    // 3) 同类型、同关联条、同说明去重
+    const dedupe = (relations: EntryRelation[]) => {
+      const seen = new Set<string>();
+      return relations.filter((relation) => {
+        const key = `${relation.type}|${relation.relatedEntryId}|${relation.detail}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+    target.relations = dedupe(collected);
+    entries.forEach((entry) => { if (entry.relations) entry.relations = dedupe(entry.relations); });
   }
 
   function undo() {
@@ -315,7 +420,7 @@ export const useDictionaryStore = defineStore('dictionary', () => {
     selectedEntry, filteredEntries, dialects, duplicates, openComments, persistableSnapshot,
     canUndo: computed(() => undoStack.value.length > 0), canRedo: computed(() => redoStack.value.length > 0),
     createEntry, updateField, setStatus, addVariant, updateVariant, removeVariant, addExample, updateExample, removeExample,
-    addSource, updateSource, removeSource, setSynonyms, addComment, replyComment, toggleComment, deleteEntry, mergeEntries,
+    addSource, updateSource, removeSource, setSynonyms, addComment, replyComment, toggleComment, deleteEntry, mergeEntries, splitEntry,
     undo, redo, restoreVersion, hydrateFromBrowser, exportPackage
   };
 });

@@ -53,6 +53,7 @@ const statusMeta = {
         <div class="entry-card-meta">
           <span>{{ entry.dialectVariants.length }} 方言变体</span>
           <span>{{ entry.examples.length }} 例句</span>
+          <span v-if="entry.relations && entry.relations.length" class="relation-count">🔗 {{ entry.relations.length }} 来源关系</span>
           <span v-if="entry.reviewerComments.filter((item) => item.status === 'open').length" class="comment-count">{{ entry.reviewerComments.filter((item) => item.status === 'open').length }} 条意见</span>
         </div>
       </button>

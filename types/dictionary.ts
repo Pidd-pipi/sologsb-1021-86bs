@@ -32,6 +32,17 @@ export interface ReviewComment {
   replies: Array<{ id: string; author: string; message: string; createdAt: string }>;
 }
 
+export type EntryRelationType = 'split-parent' | 'split-child';
+
+export interface EntryRelation {
+  id: string;
+  type: EntryRelationType;
+  relatedEntryId: string;
+  relatedHeadword: string;
+  detail: string;
+  at: string;
+}
+
 export interface DictionaryEntry {
   id: string;
   headword: string;
@@ -47,6 +58,15 @@ export interface DictionaryEntry {
   createdAt: string;
   updatedAt: string;
   reviewerComments: ReviewComment[];
+  relations?: EntryRelation[];
+}
+
+export interface SplitSensePayload {
+  entryId: string;
+  definition: string;
+  movedSenses: string[];
+  movedExampleIds: string[];
+  partOfSpeech: string;
 }
 
 export interface VersionRecord {

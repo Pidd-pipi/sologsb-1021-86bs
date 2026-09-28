@@ -1,17 +1,25 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useDictionaryStore } from '~/store/dictionary';
+import type { EntryRelation } from '~/types/dictionary';
 
 const store = useDictionaryStore();
 const activeTab = ref('basic');
+const splitOpen = ref(false);
 const entry = computed(() => store.selectedEntry);
 const synonymsText = computed(() => entry.value?.synonyms.join('、') ?? '');
 
-const eventValue = (event: any) => typeof event === 'string' || typeof event === 'number' ? String(event) : event?.target?.value ?? event?.e?.target?.value ?? event?.value ?? '';
+const eventValue = (event: any) => typeof event === 'string' || typeof event === 'number' ? String(event) : event?.target?.value ?? event?.e?.target?.value ?? event.value ?? '';
 
 const commitInput = (event: any, field: 'headword' | 'pronunciation' | 'partOfSpeech' | 'definition' | 'notes') => {
   if (!entry.value) return;
   store.updateField(entry.value.id, field, eventValue(event), field);
+};
+
+const relationLabel = (type: EntryRelation['type']) => (type === 'split-child' ? '拆出条目' : '来源原条');
+const relatedEntry = (relation: EntryRelation) => store.entries.find((item) => item.id === relation.relatedEntryId);
+const goToRelated = (relation: EntryRelation) => {
+  if (relatedEntry(relation)) store.selectedId = relation.relatedEntryId;
 };
 </script>
 
@@ -24,9 +32,27 @@ const commitInput = (event: any, field: 'headword' | 'pronunciation' | 'partOfSp
       </div>
       <div class="editor-actions">
         <t-tag :theme="entry.status === 'confirmed' ? 'success' : entry.status === 'disputed' ? 'danger' : entry.status === 'review' ? 'warning' : 'default'" variant="light">{{ entry.status }}</t-tag>
+        <t-button size="small" variant="outline" @click="splitOpen = true">按义项拆分</t-button>
         <t-button size="small" variant="outline" @click="store.setStatus(entry.id, 'review')">提交待审</t-button>
         <t-button size="small" theme="success" @click="store.setStatus(entry.id, 'confirmed')">确认词条</t-button>
       </div>
+    </div>
+
+    <div v-if="entry.relations && entry.relations.length" class="relations-bar">
+      <span class="relations-title">来源关系</span>
+      <button
+        v-for="relation in entry.relations"
+        :key="relation.id"
+        class="relation-chip"
+        :class="{ missing: !relatedEntry(relation) }"
+        :title="relation.detail"
+        @click="goToRelated(relation)"
+      >
+        <em>{{ relationLabel(relation.type) }}</em>
+        <strong>{{ relatedEntry(relation) ? relatedEntry(relation)?.headword : relation.relatedHeadword }}</strong>
+        <small v-if="relatedEntry(relation)">[{{ relatedEntry(relation)?.partOfSpeech || '词性待定' }}]</small>
+        <small v-else>已删除</small>
+      </button>
     </div>
 
     <t-tabs v-model="activeTab" class="entry-tabs">
@@ -88,5 +114,9 @@ const commitInput = (event: any, field: 'headword' | 'pronunciation' | 'partOfSp
         </div>
       </t-tab-panel>
     </t-tabs>
+
+    <ClientOnly>
+      <SplitSenseDialog v-model="splitOpen" :entry="entry" />
+    </ClientOnly>
   </section>
 </template>
