@@ -1,4 +1,4 @@
-import type { DictionaryEntry, DuplicatePair } from '~/types/dictionary';
+import type { DictionaryEntry, DuplicatePair, SenseSplitRelation } from '~/types/dictionary';
 
 export const normalizeWord = (value: string) => value
   .normalize('NFKC')
@@ -27,10 +27,18 @@ export const similarity = (left: string, right: string) => {
   return (2 * hits) / (a.length + b.length);
 };
 
-export const findDuplicates = (entries: DictionaryEntry[]): DuplicatePair[] => {
+const entriesAreSplitSiblings = (left: DictionaryEntry, right: DictionaryEntry, relations: SenseSplitRelation[]) => {
+  if (normalizeWord(left.headword) !== normalizeWord(right.headword)) return false;
+  if (left.partOfSpeech && right.partOfSpeech && left.partOfSpeech !== right.partOfSpeech) return true;
+  const ids = new Set([left.id, right.id]);
+  return relations.some((relation) => ids.has(relation.originalEntryId) && ids.has(relation.newEntryId));
+};
+
+export const findDuplicates = (entries: DictionaryEntry[], relations: SenseSplitRelation[] = []): DuplicatePair[] => {
   const pairs: DuplicatePair[] = [];
   entries.forEach((left, index) => {
     entries.slice(index + 1).forEach((right) => {
+      if (entriesAreSplitSiblings(left, right, relations)) return;
       const headwordScore = similarity(left.headword, right.headword);
       const synonymScore = Math.max(0, ...left.synonyms.map((word) => similarity(word, right.headword)), ...right.synonyms.map((word) => similarity(word, left.headword)));
       const meaningScore = similarity(left.definition, right.definition) * .35;

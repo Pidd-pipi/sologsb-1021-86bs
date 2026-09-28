@@ -1,13 +1,19 @@
 import { computed, reactive, ref } from 'vue';
 import { defineStore } from 'pinia';
 import type {
-  AuditRecord, DictionaryEntry, DictionarySnapshot, DuplicatePair, EntryStatus, ReviewComment, VersionRecord
+  AuditRecord, DictionaryEntry, DictionarySnapshot, DuplicatePair, EntryStatus, ReviewComment, SenseSplitRelation, VersionRecord
 } from '~/types/dictionary';
 import { findDuplicates } from '~/utils/dictionary';
 
 const now = () => new Date().toISOString();
 const uid = (prefix: string) => `${prefix}-${Math.random().toString(36).slice(2, 9)}-${Date.now().toString(36)}`;
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+const cloneComments = (comments: ReviewComment[]): ReviewComment[] => comments.map((comment) => ({
+  ...clone(comment),
+  id: uid('comment'),
+  replies: comment.replies.map((reply) => ({ ...reply, id: uid('reply') }))
+}));
 
 const seedEntries = (): DictionaryEntry[] => [
   {
@@ -56,6 +62,7 @@ const seedAudit: AuditRecord[] = [{
 export const useDictionaryStore = defineStore('dictionary', () => {
   const revision = ref(1);
   const entries = reactive<DictionaryEntry[]>(seedEntries());
+  const relations = reactive<SenseSplitRelation[]>([]);
   const versions = reactive<VersionRecord[]>([]);
   const audit = reactive<AuditRecord[]>(seedAudit);
   const selectedId = ref(entries[0]?.id ?? '');
@@ -71,10 +78,11 @@ export const useDictionaryStore = defineStore('dictionary', () => {
   const persistableSnapshot = computed<DictionarySnapshot>(() => ({
     revision: revision.value,
     entries: clone(entries),
+    relations: clone(relations),
     versions: clone(versions),
     audit: clone(audit)
   }));
-  const duplicates = computed<DuplicatePair[]>(() => findDuplicates(entries));
+  const duplicates = computed<DuplicatePair[]>(() => findDuplicates(entries, relations));
   const openComments = computed(() => entries.reduce((sum, entry) => sum + entry.reviewerComments.filter((comment) => comment.status === 'open').length, 0));
   const filteredEntries = computed(() => {
     const term = query.value.trim().toLowerCase();
@@ -92,14 +100,20 @@ export const useDictionaryStore = defineStore('dictionary', () => {
     return {
       revision: revision.value,
       entries: clone(entries),
+      relations: clone(relations),
       versions: clone(versions),
       audit: clone(audit)
     };
   }
 
-  function restore(value: DictionarySnapshot) {
+  function restore(value: DictionarySnapshot, options: { preserveRelations?: boolean } = {}) {
     revision.value = value.revision ?? 1;
     entries.splice(0, entries.length, ...(clone(value.entries ?? [])));
+    const restoredRelations = clone(value.relations ?? []);
+    if (options.preserveRelations) {
+      restoredRelations.push(...relations.filter((relation) => !restoredRelations.some((item) => item.id === relation.id)).map(clone));
+    }
+    relations.splice(0, relations.length, ...restoredRelations);
     versions.splice(0, versions.length, ...(clone(value.versions ?? [])));
     audit.splice(0, audit.length, ...(clone(value.audit ?? [])));
     if (!entries.some((entry) => entry.id === selectedId.value)) selectedId.value = entries[0]?.id ?? '';
@@ -109,10 +123,11 @@ export const useDictionaryStore = defineStore('dictionary', () => {
     undoStack.value = [...undoStack.value.slice(-49), snapshot()];
     redoStack.value = [];
     const before = clone(entries);
+    const relationsBefore = clone(relations);
     mutation();
     revision.value += 1;
     entries.forEach((entry) => { if (entryIds.includes(entry.id)) entry.updatedAt = now(); });
-    versions.unshift({ id: uid('version'), at: now(), action, detail, entryId: entryIds[0], before });
+    versions.unshift({ id: uid('version'), at: now(), action, detail, entryId: entryIds[0], before, relationsBefore });
     versions.splice(120);
     audit.unshift({ id: uid('audit'), at: now(), action, detail, entryIds });
     audit.splice(300);
@@ -182,6 +197,59 @@ export const useDictionaryStore = defineStore('dictionary', () => {
       const index = entry.examples.findIndex((item) => item.id === exampleId);
       if (index >= 0) entry.examples.splice(index, 1);
     });
+  }
+
+  function splitEntry(
+    entryId: string,
+    options: { definition: string; exampleIds: string[]; partOfSpeech: string }
+  ) {
+    const entry = entries.find((item) => item.id === entryId);
+    if (!entry) return;
+    const movedDefinition = options.definition.trim();
+    const remainingDefinition = entry.definition
+      .split(/[;；]+/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .filter((sense) => sense !== movedDefinition)
+      .join('；');
+    if (!movedDefinition || !remainingDefinition) return;
+
+    const selected = new Set(options.exampleIds);
+    const movedExamples = entry.examples.filter((example) => selected.has(example.id));
+    const newId = uid('entry');
+    const newEntry: DictionaryEntry = {
+      id: newId,
+      headword: entry.headword,
+      pronunciation: entry.pronunciation,
+      partOfSpeech: options.partOfSpeech.trim() || entry.partOfSpeech,
+      definition: movedDefinition,
+      dialectVariants: [],
+      examples: clone(movedExamples),
+      sources: [],
+      synonyms: [],
+      status: 'draft',
+      notes: '',
+      createdAt: now(),
+      updatedAt: now(),
+      reviewerComments: cloneComments(entry.reviewerComments)
+    };
+    const relation: SenseSplitRelation = {
+      id: uid('relation'),
+      at: now(),
+      originalEntryId: entry.id,
+      newEntryId: newId,
+      movedDefinition,
+      movedExampleIds: movedExamples.map((example) => example.id)
+    };
+
+    commit('按义项拆分', `从“${entry.headword}”移出义项到新词条`, [entry.id, newId], () => {
+      entry.definition = remainingDefinition;
+      entry.examples = entry.examples.filter((example) => !selected.has(example.id));
+      const index = entries.findIndex((item) => item.id === entry.id);
+      entries.splice(index + 1, 0, newEntry);
+      relations.unshift(relation);
+    });
+    selectedId.value = newId;
   }
 
   function addSource(entryId: string) {
@@ -257,6 +325,27 @@ export const useDictionaryStore = defineStore('dictionary', () => {
           const sourceValue = source[field] as unknown[];
           targetValue.push(...clone(sourceValue));
         });
+        relations.forEach((relation) => {
+          const merged: string[] = [];
+          if (sourceIds.includes(relation.originalEntryId)) {
+            merged.push(relation.originalEntryId);
+            relation.originalEntryId = targetId;
+          }
+          if (sourceIds.includes(relation.newEntryId)) {
+            merged.push(relation.newEntryId);
+            relation.newEntryId = targetId;
+          }
+          if (merged.length) {
+            relation.mergedEntryIds = [...new Set([...(relation.mergedEntryIds ?? []), ...merged])];
+          }
+        });
+      });
+      relations.forEach((relation) => {
+        const linksToMergedEntry = sourceIds.some((id) => [relation.originalEntryId, relation.newEntryId].includes(id));
+        if (linksToMergedEntry && relation.originalEntryId === relation.newEntryId) {
+          relation.originalEntryId = targetId;
+          relation.newEntryId = targetId;
+        }
       });
       (['headword', 'pronunciation', 'partOfSpeech', 'definition', 'notes'] as const).forEach((field) => {
         const choice = selected[field] ?? 'target';
@@ -292,6 +381,11 @@ export const useDictionaryStore = defineStore('dictionary', () => {
     if (!version) return;
     commit('恢复版本', `恢复 ${new Date(version.at).toLocaleString('zh-CN')} 之前的版本`, [], () => {
       entries.splice(0, entries.length, ...clone(version.before));
+      const restoredRelations = clone(version.relationsBefore ?? []);
+      relations.forEach((relation) => {
+        if (!restoredRelations.some((item) => item.id === relation.id)) restoredRelations.push(clone(relation));
+      });
+      relations.splice(0, relations.length, ...restoredRelations);
     });
   }
 
@@ -311,11 +405,11 @@ export const useDictionaryStore = defineStore('dictionary', () => {
   }
 
   return {
-    revision, entries, versions, audit, selectedId, hydrated, query, statusFilter, dialectFilter, fieldReplyDrafts,
+    revision, entries, relations, versions, audit, selectedId, hydrated, query, statusFilter, dialectFilter, fieldReplyDrafts,
     selectedEntry, filteredEntries, dialects, duplicates, openComments, persistableSnapshot,
     canUndo: computed(() => undoStack.value.length > 0), canRedo: computed(() => redoStack.value.length > 0),
     createEntry, updateField, setStatus, addVariant, updateVariant, removeVariant, addExample, updateExample, removeExample,
-    addSource, updateSource, removeSource, setSynonyms, addComment, replyComment, toggleComment, deleteEntry, mergeEntries,
+    addSource, updateSource, removeSource, setSynonyms, addComment, replyComment, toggleComment, deleteEntry, splitEntry, mergeEntries,
     undo, redo, restoreVersion, hydrateFromBrowser, exportPackage
   };
 });

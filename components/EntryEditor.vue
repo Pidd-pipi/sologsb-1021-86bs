@@ -1,11 +1,21 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useDictionaryStore } from '~/store/dictionary';
+import SplitSenseDialog from './SplitSenseDialog.vue';
+import type { SenseSplitRelation } from '~/types/dictionary';
 
 const store = useDictionaryStore();
 const activeTab = ref('basic');
 const entry = computed(() => store.selectedEntry);
 const synonymsText = computed(() => entry.value?.synonyms.join('、') ?? '');
+const splitOpen = ref(false);
+const entryRelations = computed(() => entry.value ? store.relations.filter((relation) => [relation.originalEntryId, relation.newEntryId].includes(entry.value!.id)) : []);
+
+const relatedEntry = (relation: SenseSplitRelation) => {
+  if (!entry.value) return undefined;
+  const id = relation.originalEntryId === entry.value.id ? relation.newEntryId : relation.originalEntryId;
+  return store.entries.find((item) => item.id === id);
+};
 
 const eventValue = (event: any) => typeof event === 'string' || typeof event === 'number' ? String(event) : event?.target?.value ?? event?.e?.target?.value ?? event?.value ?? '';
 
@@ -25,6 +35,7 @@ const commitInput = (event: any, field: 'headword' | 'pronunciation' | 'partOfSp
       <div class="editor-actions">
         <t-tag :theme="entry.status === 'confirmed' ? 'success' : entry.status === 'disputed' ? 'danger' : entry.status === 'review' ? 'warning' : 'default'" variant="light">{{ entry.status }}</t-tag>
         <t-button size="small" variant="outline" @click="store.setStatus(entry.id, 'review')">提交待审</t-button>
+        <t-button size="small" variant="outline" @click="splitOpen = true">拆分义项</t-button>
         <t-button size="small" theme="success" @click="store.setStatus(entry.id, 'confirmed')">确认词条</t-button>
       </div>
     </div>
@@ -43,6 +54,20 @@ const commitInput = (event: any, field: 'headword' | 'pronunciation' | 'partOfSp
             <label class="field-block"><span>同义词（用顿号分隔）</span><t-input :default-value="synonymsText" @blur="store.setSynonyms(entry.id, eventValue($event).split(/[、,，]/).map((item) => item.trim()).filter(Boolean))" placeholder="水潭、泉眼" /></label>
           </div>
           <label class="field-block"><span>释义</span><t-textarea :default-value="entry.definition" :autosize="{ minRows: 3, maxRows: 7 }" @blur="commitInput($event, 'definition')" placeholder="用简洁语言描述词义、语用限制和引申关系" /></label>
+          <div v-if="entryRelations.length" class="lineage-box">
+            <header><strong>义项拆分来源</strong><small>该关系会在合并与版本恢复时保留</small></header>
+            <article v-for="relation in entryRelations" :key="relation.id" class="lineage-item">
+              <div>
+                <t-tag size="small" variant="light" theme="primary">{{ relation.originalEntryId === entry.id ? '由本条目拆出' : '由原条目移入' }}</t-tag>
+                <p>{{ relation.movedDefinition }}</p>
+              </div>
+              <button v-if="relatedEntry(relation)" type="button" @click="store.selectedId = relatedEntry(relation)!.id">
+                查看{{ relation.originalEntryId === entry.id ? '新条目' : '原条' }}：{{ relatedEntry(relation)!.headword }} · {{ relatedEntry(relation)!.partOfSpeech || '词性待定' }}
+              </button>
+              <small v-else>关联条目当前不在恢复结果中，来源端点 ID 已保留</small>
+              <small v-if="relation.mergedEntryIds?.length">合并后仍保留来源端点记录</small>
+            </article>
+          </div>
           <label class="field-block"><span>编者备注</span><t-textarea :default-value="entry.notes" :autosize="{ minRows: 2, maxRows: 5 }" @blur="commitInput($event, 'notes')" placeholder="记录不确定项、调查问题或整理说明" /></label>
         </div>
       </t-tab-panel>
@@ -88,5 +113,6 @@ const commitInput = (event: any, field: 'headword' | 'pronunciation' | 'partOfSp
         </div>
       </t-tab-panel>
     </t-tabs>
+    <SplitSenseDialog v-model="splitOpen" :entry="entry" />
   </section>
 </template>

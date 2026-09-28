@@ -49,6 +49,16 @@ export interface DictionaryEntry {
   reviewerComments: ReviewComment[];
 }
 
+export interface SenseSplitRelation {
+  id: string;
+  at: string;
+  originalEntryId: string;
+  newEntryId: string;
+  movedDefinition: string;
+  movedExampleIds: string[];
+  mergedEntryIds?: string[];
+}
+
 export interface VersionRecord {
   id: string;
   at: string;
@@ -56,6 +66,7 @@ export interface VersionRecord {
   detail: string;
   entryId?: string;
   before: DictionaryEntry[];
+  relationsBefore?: SenseSplitRelation[];
 }
 
 export interface AuditRecord {
@@ -69,6 +80,7 @@ export interface AuditRecord {
 export interface DictionarySnapshot {
   revision: number;
   entries: DictionaryEntry[];
+  relations: SenseSplitRelation[];
   versions: VersionRecord[];
   audit: AuditRecord[];
 }
